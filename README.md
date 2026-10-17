@@ -33,18 +33,18 @@ Review-mode access (no secure sign-in yet):
 
 Frontend: keep this static app initially, or migrate UI components to React/Vite once the backend is connected. Host the static frontend on **GitHub Pages**. Backend: **Supabase Auth** (owner/friends), Postgres + RLS (editions, photo metadata, tags, comments and settings), **Supabase Storage** (pictures), with a transaction-scoped `publish_edition()` database function that verifies slot counts atomically. For anonymous comments, add abuse controls and a server-side validation/rate-limit path before opening the site publicly.
 
-`supabase/schema.sql` contains the initial database schema and RLS groundwork. It has **not been applied to a Supabase project**, and the standalone app is **not yet connected** to it. Avoid exposing `service_role` or passwords in frontend code.
+The backend SQL schema exists in the original review source archive and will be added to this repository after review. It has **not been applied to Supabase**, and the standalone app is **not yet connected** to it. Avoid exposing `service_role` or passwords in frontend code.
 
 ### Provisioning accounts and `creds.json`
 
-Your requested `creds.json` can be an offline, private provisioning input used once by an administrator script to create Supabase Auth users. Only Supabase Auth will then manage their password hashes and sessions; `creds.json` must not be deployed, fetched by the browser, or committed to GitHub. `.gitignore` excludes it. Copy `creds.example.json` to `creds.json` privately when ready.
+Your requested `creds.json` can be an offline, private provisioning input used once by an administrator script to create Supabase Auth users. Only Supabase Auth will then manage their password hashes and sessions; `creds.json` must not be deployed, fetched by the browser, or committed to GitHub. `.gitignore` excludes it. Create `creds.json` privately when ready; use placeholder-only `creds.example.json` as the format reference.
 
 ### Deployment path
 
 1. The repository `SinanAksoy/parsa-gallery` has been created and contains the static frontend.
 2. Publish the website through **Settings → Pages → Deploy from a branch → main / (root)**.
 3. Configure **Settings → Pages → Build and deployment → Deploy from a branch → main / (root)**; this will publish a read-only visual preview only until real backend authorization is wired in.
-4. Connect a Supabase project and execute the reviewed migration in `supabase/schema.sql`, then configure Auth users and Storage policies.
+4. Connect a Supabase project, review and add the initial SQL migration, then configure Auth users and Storage policies.
 5. Replace the simulated role access, local storage and uploads with Supabase session checks, RLS queries, and signed/controlled uploads before making the public site writable.
 
 Do not treat a GitHub Pages deployment of this prototype as a secure multi-user application. The published site must not include the simulated owner/friend mutation interface until Supabase integration is complete.
