@@ -1,0 +1,26 @@
+{
+  "name": "Persian Night",
+  "mode": "dark",
+  "referenceStatus": "Awaiting sample_theme.jpg",
+  "colors": {
+    "background": "#111c1c",
+    "backgroundRaised": "#172626",
+    "surface": "#1c2b2b",
+    "surfaceHover": "#233533",
+    "text": "#f4ebd8",
+    "textSecondary": "#aaafa3",
+    "gold": "#d6af75",
+    "terracotta": "#b46c57",
+    "sage": "#77958c"
+  },
+  "typography": {
+    "display": "Cormorant Garamond",
+    "interface": "DM Sans"
+  },
+  "motifs": ["Persian pointed arch", "subtle geometric star", "fine metallic edging", "soft photography vignette"],
+  "motion": {
+    "speed": "gentle",
+    "reducedMotion": "respected",
+    "effects": ["photo lift", "soft crossfade", "staggered reveal"]
+  }
+}
