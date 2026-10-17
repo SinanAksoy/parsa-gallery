@@ -1,5 +1,7 @@
 # Parsa's Gallery
 
+> **Supabase next step:** See [SUPABASE_SETUP.md](SUPABASE_SETUP.md) for the complete project, SQL, owner-account and key configuration steps. The live site is still browser-local until connected.
+
 Standalone, interactive visual prototype for the three-category, edition-based photography gallery.
 
 ## Open the review build
