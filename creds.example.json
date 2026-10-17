@@ -1,0 +1,15 @@
+{
+  "_purpose": "Private provisioning template; never commit real passwords",
+  "owner": {
+    "email": "owner@example.com",
+    "password": "REPLACE_WITH_PRIVATE_SECRET",
+    "display_name": "Parsa"
+  },
+  "friends": [
+    {
+      "email": "friend@example.com",
+      "password": "REPLACE_WITH_PRIVATE_SECRET",
+      "display_name": "Friend"
+    }
+  ]
+}
