@@ -1,0 +1,12 @@
+{
+  "title": "Parsa's Gallery",
+  "categories": {
+    "friends": "Friends",
+    "interactions": "Interactions",
+    "everything": "Everything else"
+  },
+  "footer": "Parsa’s Gallery",
+  "entryOwner": "Gallery owner",
+  "entryFriend": "Friends",
+  "entryVisitor": "Visitor"
+}
