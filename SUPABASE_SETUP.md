@@ -1,6 +1,6 @@
 # Supabase setup — Parsa's Gallery
 
-Current state: GitHub Pages still serves the **browser-local review site**. The SQL schema is committed, but no Supabase project has been connected and no migration has been applied. Do not treat the simulated Owner/Friends login as secure.
+Current state (18 October 2026): The live site now contains the optional Supabase adapter (`cloud.js` and cloud-enabled `app.js`). It **continues in browser-local mode while `config.js` is empty**. There is no access to your Supabase project from this GitHub repository; whether its schema has been applied must be verified in Supabase. Local-mode Owner/Friends sign-in is simulated and not secure.
 
 ## 1. Create a Supabase project
 
@@ -8,7 +8,7 @@ Visit https://supabase.com/dashboard and choose **New project**. Name it `parsa-
 
 ## 2. Initialize the database
 
-In the new project's **SQL Editor**, paste and run the complete contents of [supabase/schema.sql](supabase/schema.sql).
+First check **Table Editor** for the `profiles`, `editions`, `photos`, `photo_tags`, `comments`, and `friend_uploads` tables. If absent, open **SQL Editor**, paste and run [supabase/schema.sql](supabase/schema.sql) once on an empty project. **Do not rerun** the creation script when the tables already exist.
 
 **Important:** This schema is for a new/empty project. It creates the tables, foreign keys, publication guards, row-level security (RLS) policies, `parsa-images` bucket, and a secure role model. It does not create user passwords or populate editions.
 
@@ -54,11 +54,22 @@ Do **not** put `sb_secret_...`, a legacy `service_role` key, database passwords 
 
 Target URL for the website: https://sinanaksoy.github.io/parsa-gallery/
 
+Edit [config.js](config.js) in GitHub, replacing **only** `url` and `publishableKey` with your actual public values:
+
+```js
+window.PARSA_SUPABASE = {
+  url: 'https://YOUR_PROJECT_REF.supabase.co',
+  publishableKey: 'sb_publishable_YOUR_PUBLIC_KEY'
+};
+```
+
+Click **Commit changes** and wait for GitHub Pages to deploy. When these two values are valid, the site switches to Supabase mode. Before changing `config.js`, ensure the schema exists and the owner profile is present. If unsure, leave the two values empty until verified.
+
 For Auth email links, set **Authentication → URL Configuration → Site URL** to this website. If using email confirmations or password recovery links, also add it to allowed redirect URLs.
 
 ## 6. Connect app and test permissions
 
-The frontend must next be switched from localStorage/IndexedDB to Supabase Auth, Postgres, and Storage. Once the connection is configured, the current locally seeded editions and previously uploaded browser-only photographs will not appear in Supabase automatically; they require an explicit import. Do not overwrite user browser data expecting an automatic migration.
+The frontend already contains the cloud adapter and will switch when the public configuration is set. **Existing local editions are not transferred automatically**, including photographs stored in Safari's IndexedDB. Back up/export or arrange a migration before clearing Safari storage or assuming the old editions are in Supabase. Supabase starts with no editions unless you import or create them in cloud mode.
 
 Test the following on separate browsers: anonymous visitor sees only published editions; a friend can post/comment only where tagged; an owner can create 20-slot draft, publish, replace and delete editions; all visitors see shared updates.
 
