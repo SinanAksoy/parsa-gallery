@@ -1,8 +1,9 @@
-
-/* Parsa's Gallery — standalone, browser-local interaction review.
-   There is intentionally NO security/auth backend in this file.
-   Connect Supabase Auth + database/RLS before making a public writable deployment. */
+/* Parsa's Gallery — local review mode and optional Supabase mode.
+   Server-enforced authorization requires applying the SQL schema and configuring
+   public project URL + publishable key. Never embed a secret key. */
 'use strict';
+const CLOUD=window.ParsaCloud;
+const cloudMode=!!CLOUD?.active;
 const STORAGE_KEY='parsas.gallery.review.v1';
 const ROLE_KEY='parsas.gallery.session.v1';
 const LIMITS={friends:10,interactions:5,everything:5};
@@ -15,10 +16,14 @@ const safe=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'
 const initialEdition=(date,start=0)=>{let pos=start;return {id:mkId(),date,photos:Object.fromEntries(Object.keys(LIMITS).map(cat=>[cat,Array.from({length:LIMITS[cat]},()=>({id:mkId(),src:srcFor(art[pos++%art.length]),tags:[],comments:[],friendUploads:[],commentsEnabled:true}))]))}};
 function initialStore(){let e=initialEdition('2026-10-01',0);e.photos.friends[0].tags=[{name:'Mina',email:'mina@example.test'}];e.photos.friends[1].tags=[{name:'Arman',email:'arman@example.test'}];return {content:{...DEFAULT_CONTENT,categories:{...LABELS}},editions:[e,initialEdition('2026-07-14',20)],draft:null}};
 function readStore(){try{let v=JSON.parse(localStorage.getItem(STORAGE_KEY));if(v&&Array.isArray(v.editions)&&v.content&&v.content.categories)return v}catch{}return initialStore()}
-let store=readStore();let session;try{session=JSON.parse(sessionStorage.getItem(ROLE_KEY))}catch{session=null}
+let store=cloudMode?{content:{...DEFAULT_CONTENT,categories:{...LABELS}},editions:[],draft:null}:readStore();let session;try{session=JSON.parse(sessionStorage.getItem(ROLE_KEY))}catch{session=null}
+if(cloudMode && session?.role!=='visitor')session=null;
 let selected=store.editions[0]?.id||null;let category='friends';let modal=null;let uploadedUrlMap={};let toastTimer=null;
-function persist(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(store))}catch(e){notice('Browser storage is full; your latest change may not persist.')}}
-function setSession(s){session=s;try{sessionStorage.setItem(ROLE_KEY,JSON.stringify(s))}catch{}render()}
+function persist(){if(cloudMode)return;try{localStorage.setItem(STORAGE_KEY,JSON.stringify(store))}catch(e){notice('Browser storage is full; your latest change may not persist.')}}
+function setSession(s){session=s;try{if(!cloudMode||s?.role==='visitor')sessionStorage.setItem(ROLE_KEY,JSON.stringify(s));else sessionStorage.removeItem(ROLE_KEY)}catch{}render()}
+async function reloadCloud(){if(!cloudMode)return;let prev=selected;store=await CLOUD.load();selected=store.editions.some(e=>e.id===prev)?prev:store.editions[0]?.id||null;render()}
+function cloudError(e){console.error(e);notice(e?.message||'Unable to complete operation')}
+function awaitImage(file,fn){if(!file)return Promise.resolve();if(!cloudMode)return onImage(file,fn);return fn(file).then(()=>reloadCloud()).then(()=>notice('Photograph saved')).catch(cloudError)}
 function notice(msg){let t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),3500)}
 function label(cat){return store.content.categories[cat]||LABELS[cat]}
 function edition(){return store.editions.find(x=>x.id===selected)||store.editions[0]}
@@ -99,8 +104,8 @@ function renderModal(){if(!modal)return '';let wide=['photo','edit','create'].in
 function render(){document.getElementById('app').innerHTML=(session?gallery():entry())+renderModal();document.body.style.overflow=modal?'hidden':''}
 function returnToPhoto(){modal={type:'photo',edId:modal.edId,cat:modal.cat,index:modal.index};render()}
 function updatedPhoto(){return modal.draft?store.draft.photos[modal.cat][modal.index]:getPhoto(modal.edId,modal.cat,modal.index)}
-function openCreate(){if(!store.draft)store.draft={date:new Date().toISOString().slice(0,10),photos:Object.fromEntries(Object.entries(LIMITS).map(([c,n])=>[c,Array(n).fill(null)]))};persist();modal={type:'create'};render()}
-function saveTag(name,email){let p=updatedPhoto();if(p.tags.some(t=>t.email.toLowerCase()===email.toLowerCase())){notice('This friend is already tagged');return}p.tags.push({name,email});persist();render();notice('Friend tagged')}
+async function openCreate(){if(cloudMode){if(!store.draft){let day=new Date().toISOString().slice(0,10);await CLOUD.createDraft(day);await reloadCloud()}modal={type:'create'};render();return;}if(!store.draft)store.draft={date:new Date().toISOString().slice(0,10),photos:Object.fromEntries(Object.entries(LIMITS).map(([c,n])=>[c,Array(n).fill(null)]))};persist();modal={type:'create'};render()}
+async function saveTag(name,email){let p=updatedPhoto();if(p.tags.some(t=>t.email.toLowerCase()===email.toLowerCase())){notice('This friend is already tagged');return}if(cloudMode){await CLOUD.addTag(p.id,name,email);await reloadCloud()}else{p.tags.push({name,email});persist();render()}notice('Friend tagged')}
 function blobDb(){return new Promise((resolve,reject)=>{const req=indexedDB.open('parsas-gallery-images',1);req.onupgradeneeded=()=>req.result.createObjectStore('files');req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}
 async function writeBlob(file){if(!file?.type?.startsWith('image/'))throw new Error('Select an image');if(file.size>18*1024*1024)throw new Error('Image must be smaller than 18 MB');let db=await blobDb(),key='idb:'+mkId();await new Promise((res,rej)=>{const tx=db.transaction('files','readwrite');tx.objectStore('files').put(file,key);tx.oncomplete=res;tx.onerror=()=>rej(tx.error)});db.close();return key}
 async function hydrate(){let keys=new Set();for(let ed of store.editions)for(let c of Object.keys(LIMITS))for(let p of ed.photos[c]){if(p.src?.startsWith('idb:'))keys.add(p.src);for(let f of p.friendUploads||[])if(f.src?.startsWith('idb:'))keys.add(f.src)}if(store.draft)for(let c of Object.keys(LIMITS))for(let p of store.draft.photos[c])if(p?.src?.startsWith('idb:'))keys.add(p.src);if(!keys.size)return;let db=await blobDb();await Promise.all([...keys].filter(k=>!uploadedUrlMap[k]).map(key=>new Promise(res=>{const r=db.transaction('files').objectStore('files').get(key);r.onsuccess=()=>{if(r.result)uploadedUrlMap[key]=URL.createObjectURL(r.result);res()};r.onerror=res})));db.close()}
@@ -110,37 +115,36 @@ async function onAction(el){let action=el.dataset.action;
  if(action==='backdrop'){if(el.classList.contains('modal-backdrop')){modal=null;render()}return}
  if(action==='close'){modal=null;render();return}
  if(action==='auth'){modal={type:'auth',role:el.dataset.role};render();return}
- if(action==='logout'){session=null;try{sessionStorage.removeItem(ROLE_KEY)}catch{}modal=null;render();return}
+ if(action==='logout'){if(cloudMode)await CLOUD.signOut();session=null;try{sessionStorage.removeItem(ROLE_KEY)}catch{}modal=null;render();return}
  if(action==='edition'){selected=el.dataset.id;category='friends';render();return}
  if(action==='category'){category=el.dataset.cat;render();return}
  if(action==='photo'){modal={type:'photo',edId:edition().id,cat:el.dataset.cat,index:Number(el.dataset.index)};render();return}
  if(action==='settings'&&session.role==='owner'){modal={type:'settings'};render();return}
- if(action==='create'&&session.role==='owner'){openCreate();return}
- if(action==='delete-edition'&&session.role==='owner'){let e=edition();if(e&&confirm('Delete the entire edition, including its comments and shared images?')){store.editions=store.editions.filter(x=>x.id!==e.id);goNextEdition();persist();render();notice('Edition deleted')}return}
+ if(action==='create'&&session.role==='owner'){await openCreate();return}
+ if(action==='delete-edition'&&session.role==='owner'){let e=edition();if(e&&confirm('Delete the entire edition, including its comments and shared images?')){if(cloudMode){await CLOUD.deleteEdition(e.id);await reloadCloud()}else{store.editions=store.editions.filter(x=>x.id!==e.id);goNextEdition();persist();render()}notice('Edition deleted')}return}
  if(action==='edit-photo'&&session.role==='owner'){modal={type:'edit',edId:modal.edId,cat:modal.cat,index:modal.index,draft:false};render();return}
  if(action==='draft-edit'&&session.role==='owner'){modal={type:'edit',cat:el.dataset.cat,index:Number(el.dataset.index),draft:true};render();return}
  if(action==='back-photo'){if(modal.draft){modal={type:'create'};render()}else returnToPhoto();return}
- if(action==='remove-tag'&&session.role==='owner'){updatedPhoto().tags.splice(Number(el.dataset.tagIndex),1);persist();render();return}
- if(action==='publish'&&session.role==='owner'){if(draftCount()!==20)return;let d=store.draft;if(!d.date){notice('Choose an edition date');return}if(store.editions.some(e=>e.date===d.date)){notice('An edition already exists on this date');return}store.editions.unshift({id:mkId(),date:d.date,photos:d.photos});store.editions.sort((a,b)=>b.date.localeCompare(a.date));store.draft=null;selected=store.editions.find(e=>e.date===d.date).id;category='friends';modal=null;persist();render();notice('Edition published');return}
+ if(action==='remove-tag'&&session.role==='owner'){let p=updatedPhoto(),i=Number(el.dataset.tagIndex);if(cloudMode){await CLOUD.removeTag(p.id,p.tags[i].email);await reloadCloud()}else{p.tags.splice(i,1);persist();render()}return}
+ if(action==='publish'&&session.role==='owner'){if(draftCount()!==20)return;let d=store.draft;if(!d.date){notice('Choose an edition date');return}if(store.editions.some(e=>e.date===d.date)){notice('An edition already exists on this date');return}if(cloudMode){await CLOUD.publishDraft(d.id);await reloadCloud();selected=store.editions.find(e=>e.date===d.date)?.id||selected}else{store.editions.unshift({id:mkId(),date:d.date,photos:d.photos});store.editions.sort((a,b)=>b.date.localeCompare(a.date));store.draft=null;selected=store.editions.find(e=>e.date===d.date).id}category='friends';modal=null;persist();render();notice('Edition published');return}
 }
-document.addEventListener('click',event=>{if(event.target.classList?.contains('modal-backdrop')){modal=null;render();return}let target=event.target.closest('[data-action]');if(target&&target.dataset.action!=='backdrop')onAction(target)});
-document.addEventListener('submit',async event=>{let form=event.target;event.preventDefault();let data=new FormData(form);
- if(form.id==='auth-form'){let role=form.dataset.role;if(role==='visitor'){let name=String(data.get('name')||'').trim();if(!name)return;setSession({role,name})}else{let email=String(data.get('email')||'').trim().toLowerCase(),password=String(data.get('password')||'');if(!email||!password)return;setSession({role,name:email.split('@')[0],email})}modal=null;render();return}
- if(form.id==='settings-form'&&session.role==='owner'){store.content.title=String(data.get('title')).trim();for(let c of Object.keys(LIMITS))store.content.categories[c]=String(data.get('category_'+c)).trim();for(let c of ['footer','entryOwner','entryFriend','entryVisitor'])store.content[c]=String(data.get(c)||'').trim();persist();modal=null;render();notice('Content updated');return}
- if(form.id==='comment-form'){let p=getPhoto(modal.edId,modal.cat,modal.index),allowed=modal.cat==='interactions'||modal.cat==='everything'&&p.commentsEnabled||modal.cat==='friends'&&(session.role==='owner'||session.role==='friend'&&p.tags.some(t=>t.email.toLowerCase()===session.email));if(!allowed)return;let text=String(data.get('text')||'').trim();if(!text)return;p.comments.push({id:mkId(),name:session.name||session.email||'Guest',text:text.slice(0,1000),at:new Date().toISOString()});persist();render();notice('Comment added');return}
- if(form.id==='tag-form'&&session.role==='owner'&&modal.cat==='friends'){let name=String(data.get('name')||'').trim(),email=String(data.get('email')||'').trim().toLowerCase();if(name&&email)saveTag(name,email);return}
-});
-document.addEventListener('change',async event=>{let t=event.target;
- if(t.id==='comments-toggle'||t.id==='edit-comments-toggle'){if(session.role!=='owner')return;let p=t.id==='comments-toggle'?getPhoto(modal.edId,modal.cat,modal.index):updatedPhoto();p.commentsEnabled=t.checked;persist();render();notice(t.checked?'Comments enabled':'Comments disabled');return}
- if(t.id==='edition-date'){if(store.draft){store.draft.date=t.value;persist()}return}
- if(t.dataset.draftCat&&session.role==='owner'){let cat=t.dataset.draftCat,index=Number(t.dataset.draftIndex);await onImage(t.files?.[0],async src=>{let before=store.draft.photos[cat][index];store.draft.photos[cat][index]={id:mkId(),src,tags:before?.tags||[],comments:[],friendUploads:[],commentsEnabled:before?.commentsEnabled??true};persist()});return}
- if(t.id==='replace-image'&&session.role==='owner'){let m={...modal};await onImage(t.files?.[0],async src=>{let p=m.draft?store.draft.photos[m.cat][m.index]:getPhoto(m.edId,m.cat,m.index);p.src=src;if(!m.draft){p.tags=[];p.comments=[];p.friendUploads=[]}persist()});return}
- if(t.id==='friend-image'&&session.role==='friend'){let m={...modal},p=getPhoto(m.edId,m.cat,m.index);if(m.cat!=='friends'||!p?.tags.some(tag=>tag.email.toLowerCase()===session.email)||p.friendUploads.some(u=>u.email===session.email))return;await onImage(t.files?.[0],async src=>{p.friendUploads.push({id:mkId(),src,name:session.name,email:session.email});persist()});return}
-});
+document.addEventListener('click',event=>{if(event.target.classList?.contains('modal-backdrop')){modal=null;render();return}let target=event.target.closest('[data-action]');if(target&&target.dataset.action!=='backdrop')onAction(target).catch(cloudError)});
+document.addEventListener('submit',async event=>{let form=event.target;event.preventDefault();try{let data=new FormData(form);
+ if(form.id==='auth-form'){let role=form.dataset.role;if(role==='visitor'){let name=String(data.get('name')||'').trim();if(!name)return;setSession({role,name})}else{let email=String(data.get('email')||'').trim().toLowerCase(),password=String(data.get('password')||'');if(!email||!password)return;if(cloudMode){let authorized=await CLOUD.signIn(role,email,password);setSession(authorized);await reloadCloud()}else setSession({role,name:email.split('@')[0],email})}modal=null;render();return}
+ if(form.id==='settings-form'&&session.role==='owner'){store.content.title=String(data.get('title')).trim();for(let c of Object.keys(LIMITS))store.content.categories[c]=String(data.get('category_'+c)).trim();for(let c of ['footer','entryOwner','entryFriend','entryVisitor'])store.content[c]=String(data.get(c)||'').trim();if(cloudMode){await CLOUD.saveContent(store.content);await reloadCloud()}else persist();modal=null;render();notice('Content updated');return}
+ if(form.id==='comment-form'){let p=getPhoto(modal.edId,modal.cat,modal.index),allowed=modal.cat==='interactions'||modal.cat==='everything'&&p.commentsEnabled||modal.cat==='friends'&&(session.role==='owner'||session.role==='friend'&&p.tags.some(t=>t.email.toLowerCase()===session.email));if(!allowed)return;let text=String(data.get('text')||'').trim();if(!text)return;if(cloudMode){await CLOUD.comment(p.id,text.slice(0,1000),session.name);await reloadCloud()}else{p.comments.push({id:mkId(),name:session.name||session.email||'Guest',text:text.slice(0,1000),at:new Date().toISOString()});persist();render()}notice('Comment added');return}
+ if(form.id==='tag-form'&&session.role==='owner'&&modal.cat==='friends'){let name=String(data.get('name')||'').trim(),email=String(data.get('email')||'').trim().toLowerCase();if(name&&email)await saveTag(name,email);return}
+}catch(e){cloudError(e)}});
+document.addEventListener('change',async event=>{try{let t=event.target;
+ if(t.id==='comments-toggle'||t.id==='edit-comments-toggle'){if(session.role!=='owner')return;let p=t.id==='comments-toggle'?getPhoto(modal.edId,modal.cat,modal.index):updatedPhoto();if(cloudMode){await CLOUD.toggleComments(p.id,t.checked);await reloadCloud()}else{p.commentsEnabled=t.checked;persist();render()}notice(t.checked?'Comments enabled':'Comments disabled');return}
+ if(t.id==='edition-date'){if(store.draft){if(cloudMode)await CLOUD.changeDraftDate(store.draft.id,t.value);store.draft.date=t.value;persist()}return}
+ if(t.dataset.draftCat&&session.role==='owner'){let cat=t.dataset.draftCat,index=Number(t.dataset.draftIndex);if(cloudMode){await awaitImage(t.files?.[0],file=>CLOUD.uploadDraftSlot(store.draft,cat,index,file))}else await onImage(t.files?.[0],async src=>{let before=store.draft.photos[cat][index];store.draft.photos[cat][index]={id:mkId(),src,tags:before?.tags||[],comments:[],friendUploads:[],commentsEnabled:before?.commentsEnabled??true};persist()});return}
+ if(t.id==='replace-image'&&session.role==='owner'){let m={...modal};if(cloudMode){let p=m.draft?store.draft.photos[m.cat][m.index]:getPhoto(m.edId,m.cat,m.index);await awaitImage(t.files?.[0],file=>CLOUD.replacePhoto(p.id,file))}else await onImage(t.files?.[0],async src=>{let p=m.draft?store.draft.photos[m.cat][m.index]:getPhoto(m.edId,m.cat,m.index);p.src=src;if(!m.draft){p.tags=[];p.comments=[];p.friendUploads=[]}persist()});return}
+ if(t.id==='friend-image'&&session.role==='friend'){let m={...modal},p=getPhoto(m.edId,m.cat,m.index);if(m.cat!=='friends'||!p?.tags.some(tag=>tag.email.toLowerCase()===session.email)||p.friendUploads.some(u=>u.email===session.email))return;if(cloudMode){await awaitImage(t.files?.[0],file=>CLOUD.uploadFriend(p.id,file))}else await onImage(t.files?.[0],async src=>{p.friendUploads.push({id:mkId(),src,name:session.name,email:session.email});persist()});return}
+}catch(e){cloudError(e)}});
 async function loadThemeAndCopy(){
   // File URLs may disallow fetch; built-in defaults still allow the standalone HTML to open.
   try{let response=await fetch('./theme.json');if(response.ok){let theme=await response.json(),palette={background:'--bg',backgroundRaised:'--bg2',surface:'--panel',surfaceHover:'--panel2',text:'--ink',textSecondary:'--muted',gold:'--accent',terracotta:'--accent2',sage:'--teal'};for(let [key,value] of Object.entries(theme.colors||{})){if(palette[key]&&/^#[a-fA-F0-9]{6}$/.test(value))document.documentElement.style.setProperty(palette[key],value)}}}catch{}
   try{let response=await fetch('./content.json');if(response.ok){let defaults=await response.json();let hasLocal=false;try{hasLocal=!!localStorage.getItem(STORAGE_KEY)}catch{};if(!hasLocal){store.content={...store.content,...defaults,categories:{...store.content.categories,...defaults.categories}}}}}catch{}
 }
-(async()=>{try{await loadThemeAndCopy();await hydrate()}catch(e){console.warn('Local media initialization unavailable',e)}render()})();
-
+(async()=>{try{await loadThemeAndCopy();if(cloudMode){await CLOUD.initialize();session=CLOUD.currentSession()||(session?.role==='visitor'?session:null);store=await CLOUD.load();selected=store.editions[0]?.id||null;}else await hydrate();render()}catch(e){console.error('Gallery initialization failed',e);if(cloudMode){document.getElementById('app').innerHTML=`<main class="entry"><section class="entry-left"><div class="entry-brand">Parsa's Gallery</div><div class="entry-intro"><h1>Connection unavailable</h1><p>Check the Supabase configuration and database setup.</p></div></section></main>`}else render();notice(e.message||'Unable to load gallery')}})();
