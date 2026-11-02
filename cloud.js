@@ -28,7 +28,8 @@
   }
   async function initialize() {
     if(!active) return;
-    if(!window.supabase?.createClient) throw new Error('Supabase library did not load');
+    if(window.parsaSupabaseReady) await window.parsaSupabaseReady;
+    if(!window.supabase?.createClient) throw new Error('Supabase JavaScript library did not load. Open connection-check.html for diagnostics.');
     client=window.supabase.createClient(config.url,config.publishableKey,{auth:{persistSession:true,autoRefreshToken:true}});
     const result=await client.auth.getUser();
     if(result.error && result.error.name!=='AuthSessionMissingError') throw result.error;
