@@ -13,7 +13,46 @@
   <div class="noise" aria-hidden="true"></div>
   <div id="app"></div>
   <div id="toast" aria-live="polite" role="status"></div>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+  // Try both documented UMD CDNs. Delaying startup avoids a race on slow connections.
+  window.parsaSupabaseReady = new Promise((resolve, reject) => {
+    const urls = [
+      'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2',
+      'https://unpkg.com/@supabase/supabase-js@2'
+    ];
+    let index = 0;
+    function next() {
+      if (window.supabase && typeof window.supabase.createClient === 'function') {
+        resolve();
+        return;
+      }
+      if (index >= urls.length) {
+        reject(new Error('Supabase JavaScript library could not load from either CDN. Check your network or content blockers.'));
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = urls[index++];
+      script.crossOrigin = 'anonymous';
+      let completed = false;
+      const timeout = setTimeout(() => {
+        if (completed) return;
+        completed = true;
+        script.remove();
+        next();
+      }, 12000);
+      function done() {
+        if (completed) return;
+        completed = true;
+        clearTimeout(timeout);
+        next();
+      }
+      script.onload = done;
+      script.onerror = done;
+      document.head.appendChild(script);
+    }
+    next();
+  });
+</script>
   <script src="config.js" defer></script>
   <script src="cloud.js" defer></script>
   <script src="app.js" defer></script>
