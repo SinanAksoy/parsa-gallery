@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gallery connection check</title>
+  <style>
+    :root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#111c1b;color:#f1e9d8;font:16px/1.55 system-ui,-apple-system,sans-serif}
+    main{max-width:760px;margin:auto;padding:48px 22px}h1{font-size:clamp(1.7rem,5vw,2.7rem);font-weight:500;margin:8px 0 10px}p{color:#b8beb8}
+    a{color:#dfbb78}.eyebrow{font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:#d2b67a}
+    #results{display:grid;gap:10px;margin-top:32px}.item{border:1px solid #374a43;border-radius:12px;padding:16px;background:#192725}
+    .item b{font-size:15px}.item small{display:block;color:#bec7be;margin-top:5px;overflow-wrap:anywhere}
+    .ok{color:#91c4a0}.bad{color:#ecaa98}.pending{color:#cbb88c}#summary{margin-top:26px;padding-top:15px;border-top:1px solid #374a43}
+    button{background:#d2b67a;color:#152320;border:0;border-radius:6px;padding:11px 15px;font-weight:600}
+  </style>
+  <script src="config.js"></script>
+</head>
+<body>
+<main><div class="eyebrow">Parsa's Gallery</div><h1>Connection check</h1>
+<p>Checks the public Supabase connection from this browser. No passwords or secret keys are required or displayed.</p>
+<div id="results" role="status" aria-live="polite"></div><div id="summary"></div>
+<p><a href="./">Return to gallery</a></p>
+</main>
+<script>
+'use strict';
+const results = document.getElementById('results');
+const summary = document.getElementById('summary');
+let problems = 0;
+function result(name,ok,detail){
+  if(!ok)problems++;
+  const div=document.createElement('div');div.className='item';
+  const heading=document.createElement('b');heading.className=ok?'ok':'bad';heading.textContent=(ok?'✓ ':'✕ ')+name;
+  const note=document.createElement('small');note.textContent=detail;
+  div.append(heading,note);results.append(div);
+}
+function loadLibrary(){
+  return new Promise(resolve=>{
+    const sources=['https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2','https://unpkg.com/@supabase/supabase-js@2'];
+    let index=0;
+    function next(){
+      if(window.supabase?.createClient){resolve(true);return;}
+      if(index>=sources.length){resolve(false);return;}
+      const s=document.createElement('script');s.src=sources[index++];
+      let done=false;
+      const timer=setTimeout(()=>{if(done)return;done=true;s.remove();next();},8000);
+      s.onload=s.onerror=()=>{if(done)return;done=true;clearTimeout(timer);next();};
+      document.head.appendChild(s);
+    }next();
+  });
+}
+async function probe(url,key,table) {
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),10000);
+  try{
+    const response=await fetch(url+'/rest/v1/'+table+'?select=*&limit=1',{
+      method:'GET',mode:'cors',headers:{apikey:key,Accept:'application/json'},signal:controller.signal,cache:'no-store'
+    });
+    if(response.ok){result('Table: '+table,true,'HTTP '+response.status+' — readable from this browser');return;}
+    const body=await response.json().catch(()=>({}));
+    const message=[body.code,body.message].filter(Boolean).join(' — ');
+    result('Table: '+table,false,'HTTP '+response.status+(message?' — '+message:''));
+  }catch(e){result('Table: '+table,false,e.name==='AbortError'?'Timed out connecting to Supabase':(e.message||String(e)));}
+  finally{clearTimeout(timer);}
+}
+(async()=>{
+ const config=window.PARSA_SUPABASE||{};
+ const url=String(config.url||'').replace(/\/$/,'');
+ const key=String(config.publishableKey||'');
+ const valid=/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(url)&&/^(sb_publishable_|eyJ)/.test(key);
+ result('Public configuration',valid,valid?'Project URL and publishable key are present':'Fill in the URL and publishable key in GitHub config.js');
+ if(!valid){summary.textContent='Fix config.js before continuing.';return;}
+ const library=await loadLibrary();
+ result('Supabase JavaScript library',library,library?'Browser can load the client SDK':'Both CDN sources failed. A network, DNS or content blocker may be preventing the SDK from loading.');
+ await probe(url,key,'categories');
+ await probe(url,key,'site_content');
+ await probe(url,key,'editions');
+ await probe(url,key,'photos');
+ await probe(url,key,'public_photo_tags');
+ summary.textContent=problems===0?'Public connection checks passed. If owner login fails, verify your Supabase Auth user and the matching profiles row.':problems+' check(s) failed. A 404/PGRST205 usually means the SQL schema was not applied; 401/403 indicates an API key or database access issue. Network errors may indicate that Supabase is unreachable from this browser.';
+})().catch(e=>{result('Unexpected error',false,e.message||String(e));summary.textContent='Review the failed check above.'});
+</script>
+</body>
+</html>
